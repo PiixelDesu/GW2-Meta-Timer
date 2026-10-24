@@ -4,7 +4,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 import requests
 
-CATEGORIES=('Heart of Thorns','Path of Fire','End of Dragons','Secrets of the Obscure','Janthir Wilds','Visions of Eternity','Living World','The Icebrood Saga','Public Instances')
+CATEGORIES=('Core Tyria','Heart of Thorns','Path of Fire','End of Dragons','Secrets of the Obscure','Janthir Wilds','Visions of Eternity','Living World','The Icebrood Saga','Public Instances')
 SESSION=requests.Session()
 SESSION.headers['User-Agent']='GW2DiscordOfflineMeta/2.0'
 
@@ -45,6 +45,8 @@ def build(events, now):
     for event in events:
         if event.get('active') is False:
             continue
+        if event.get('category') == 'Core Tyria' and 'pvp' in str(event.get('name', '')).lower():
+            continue
         cat = event.get('category', '')
         if not any(cat.startswith(c) for c in CATEGORIES):
             continue
@@ -56,7 +58,7 @@ def build(events, now):
             valid.append((ts, name))
         if valid:
             ts, phase = min(valid)
-            groups.setdefault(cat, []).append((ts, event.get('name', 'Map'), phase))
+            groups.setdefault(cat, []).append((int(event.get('id', 999999)), ts, event.get('name', 'Map'), phase))
 
     if not groups:
         raise ValueError('No scheduled events found; check events.json')
@@ -64,10 +66,10 @@ def build(events, now):
     # Each category is a field within one embed. Multiple fields fit inside one
     # embed; splitting at Discord's field limits keeps every expansion visible.
     fields = []
-    for cat, rows in sorted(groups.items()):
+    for cat, rows in sorted(groups.items(), key=lambda kv: min(r[0] for r in kv[1])):
         rows.sort(key=lambda r: (r[0], r[1]))
         lines = [f'• **{str(map_name)[:90]} — {phase[:110]}** · <t:{ts}:R> (<t:{ts}:t>)'
-                 for ts, map_name, phase in rows]
+                 for event_id, ts, map_name, phase in rows]
         # Discord field values max 1024 characters; chunk without dropping rows.
         chunk, chunk_len, part = [], 0, 1
         for line in lines:
