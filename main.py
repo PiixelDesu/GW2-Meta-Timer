@@ -37,27 +37,73 @@ def occurrences(event,now):
         if cursor>now.timestamp()+86400:break
     return out
 
-def build(events,now):
-    groups={}
+def build(events, now):
+    # One next scheduled phase per map/event group, rather than five per expansion.
+    # Discord permits at most 10 embeds, each with a 4096-character description.
+    groups = {}
+    now_ts = now.timestamp()
     for event in events:
-        if event.get('active') is False:continue
-        cat=event.get('category','')
-        if not any(cat.startswith(c) for c in CATEGORIES):continue
-        for ts,seg in occurrences(event,now):
-            if ts<now.timestamp():continue
-            name=seg.get('name','').strip()
-            if not name or name.lower().startswith(('reset','(continued)','preparations')):continue
-            groups.setdefault(cat,[]).append((ts,f"{event.get('name','Map')} — {name}"))
-    if not groups:raise ValueError('No scheduled events found; check events.json')
-    embeds=[]
-    for cat,rows in sorted(groups.items()):
-        rows=sorted(rows)[:5]
-        desc='\n'.join(f'• **{name[:110]}** · <t:{ts}:R> (<t:{ts}:t>)' for ts,name in rows)
-        embeds.append({'title':cat[:256],'description':desc[:4000],'color':0x18a999})
-    if len(embeds)>10:
-        overflow=embeds[9:]
-        embeds=embeds[:9]+[{'title':'Other metas','description':'\n'.join(f"**{e['title']}**\n{e['description']}" for e in overflow)[:4000],'color':0x18a999}]
-    return {'content':f'**Guild Wars 2 — Scheduled Meta Events**\nUpdated <t:{int(now.timestamp())}:R> · Local timezone timestamps\nOffline schedule from community dataset; instance progress may vary.', 'embeds':embeds,'allowed_mentions':{'parse':[]}}
+        if event.get('active') is False:
+            continue
+        cat = event.get('category', '')
+        if not any(cat.startswith(c) for c in CATEGORIES):
+            continue
+        valid = []
+        for ts, seg in occurrences(event, now):
+            name = str(seg.get('name', '')).strip()
+            if ts < now_ts or not name or name.lower().startswith(('reset', '(continued)', 'preparations')):
+                continue
+            valid.append((ts, name))
+        if valid:
+            ts, phase = min(valid)
+            groups.setdefault(cat, []).append((ts, event.get('name', 'Map'), phase))
+
+    if not groups:
+        raise ValueError('No scheduled events found; check events.json')
+
+    # Each category is a field within one embed. Multiple fields fit inside one
+    # embed; splitting at Discord's field limits keeps every expansion visible.
+    fields = []
+    for cat, rows in sorted(groups.items()):
+        rows.sort(key=lambda r: (r[0], r[1]))
+        lines = [f'• **{str(map_name)[:90]} — {phase[:110]}** · <t:{ts}:R> (<t:{ts}:t>)'
+                 for ts, map_name, phase in rows]
+        # Discord field values max 1024 characters; chunk without dropping rows.
+        chunk, chunk_len, part = [], 0, 1
+        for line in lines:
+            length = len(line) + (1 if chunk else 0)
+            if chunk and chunk_len + length > 1024:
+                fields.append({'name': cat + (f' (part {part})' if part > 1 else ''),
+                               'value': '\n'.join(chunk), 'inline': False})
+                part += 1
+                chunk, chunk_len = [], 0
+            chunk.append(line)
+            chunk_len += len(line) + (1 if len(chunk) > 1 else 0)
+        if chunk:
+            fields.append({'name': cat + (f' (part {part})' if part > 1 else ''),
+                           'value': '\n'.join(chunk), 'inline': False})
+
+    # At most 25 fields per embed, 6000 chars combined embed text, 10 embeds.
+    embeds = []
+    batch, size = [], 0
+    for field in fields:
+        cost = len(field['name']) + len(field['value'])
+        if batch and (len(batch) >= 25 or size + cost > 5500):
+            embeds.append({'color': 0x18a999, 'fields': batch})
+            batch, size = [], 0
+        batch.append(field)
+        size += cost
+    if batch:
+        embeds.append({'color': 0x18a999, 'fields': batch})
+    if len(embeds) > 10:
+        raise ValueError('Too many event embeds for a single Discord message')
+    print(f'Dashboard: {sum(len(v) for v in groups.values())} event groups, '
+          f'{len(groups)} categories, {len(embeds)} embeds')
+    return {
+        'content': f'**Guild Wars 2 — Scheduled Meta Events**\nUpdated <t:{int(now_ts)}:R> · Local timezone timestamps\nNext scheduled phase per map. Offline community dataset; instance progress may vary.',
+        'embeds': embeds,
+        'allowed_mentions': {'parse': []}
+    }
 
 def call(method,url,payload):
     for _ in range(4):
