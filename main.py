@@ -57,8 +57,18 @@ def build(events, now):
                 continue
             valid.append((ts, name))
         if valid:
-            ts, phase = min(valid)
-            groups.setdefault(cat, []).append((int(event.get('id', 999999)), ts, event.get('name', 'Map'), phase))
+            event_id = int(event.get('id', 999999))
+            if cat == 'Core Tyria' and event.get('name') in ('World bosses', 'Hard world bosses'):
+                # Show every distinct boss's next spawn in the next 24 hours.
+                # Keep event-ID ordering, then chronological order within each boss rotation.
+                first_by_boss = {}
+                for ts, phase in valid:
+                    first_by_boss.setdefault(phase, ts)
+                for phase, ts in sorted(first_by_boss.items(), key=lambda item: item[1]):
+                    groups.setdefault(cat, []).append((event_id, ts, event.get('name', 'Map'), phase))
+            else:
+                ts, phase = min(valid)
+                groups.setdefault(cat, []).append((event_id, ts, event.get('name', 'Map'), phase))
 
     if not groups:
         raise ValueError('No scheduled events found; check events.json')
@@ -102,7 +112,7 @@ def build(events, now):
     print(f'Dashboard: {sum(len(v) for v in groups.values())} event groups, '
           f'{len(groups)} categories, {len(embeds)} embeds')
     return {
-        'content': f'**Guild Wars 2 — Scheduled Meta Events**\nUpdated <t:{int(now_ts)}:R> · Local timezone timestamps\nNext scheduled phase per map. Offline community dataset; instance progress may vary.',
+        'content': f'**Guild Wars 2 — Scheduled Meta Events**\nUpdated <t:{int(now_ts)}:R> · Local timezone timestamps\nNext phase per map; all upcoming Core Tyria world bosses. Offline schedule; instance progress may vary.',
         'embeds': embeds,
         'allowed_mentions': {'parse': []}
     }
