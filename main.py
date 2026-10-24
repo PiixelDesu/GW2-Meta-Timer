@@ -9,11 +9,61 @@ CATEGORIES = ('Heart of Thorns','Path of Fire','End of Dragons','Secrets of the 
 SESSION = requests.Session()
 SESSION.headers['User-Agent'] = 'GW2DiscordMetaDashboard/1.0 (personal Discord dashboard)'
 
+
 def fetch():
-    r=SESSION.get(WIKI,timeout=25);r.raise_for_status()
-    data=r.json()
-    if not isinstance(data.get('events'),dict): raise ValueError('Wiki event data format changed: expected events object')
-    return data['events']
+    sources = [
+        (
+            "https://wiki.guildwars2.com/api.php",
+            {
+                "action": "parse",
+                "page": "Widget:Event_timer/data.json",
+                "prop": "wikitext",
+                "format": "json",
+                "formatversion": "2",
+            },
+        ),
+        (
+            "https://wiki.guildwars2.com/w/index.php",
+            {
+                "title": "Widget:Event_timer/data.json",
+                "action": "raw",
+            },
+        ),
+    ]
+
+    errors = []
+
+    for url, params in sources:
+        try:
+            r = SESSION.get(
+                url,
+                params=params,
+                headers={
+                    "User-Agent": "GW2MetaTimer/1.0 (Discord event schedule)",
+                    "Accept": "application/json",
+                },
+                timeout=25,
+            )
+            r.raise_for_status()
+            result = r.json()
+
+            if "parse" in result:
+                data = json.loads(result["parse"]["wikitext"])
+            else:
+                data = result
+
+            if not isinstance(data.get("events"), dict):
+                raise ValueError("Unexpected wiki event data format")
+
+            return data["events"]
+
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            errors.append(f"{url}: {exc}")
+
+    raise RuntimeError(
+        "All GW2 Wiki data sources failed:\n" + "\n".join(errors)
+    )
+
 
 def occurrences(event, now):
     """Repeat wiki pattern from midnight UTC, respecting partial prefix after midnight.
