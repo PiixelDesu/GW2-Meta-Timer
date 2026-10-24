@@ -2,8 +2,8 @@
 name: Update GW2 Meta Dashboard
 
 on:
-  schedule:
-    - cron: '3,8,13,18,23,28,33,38,43,48,53,58 * * * *'
+  repository_dispatch:
+    types: [gw2_timer_update]
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,8 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: python main.py
+      - name: Update Discord dashboard
+        run: python main.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_MESSAGE_ID: ${{ secrets.DISCORD_MESSAGE_ID }}
