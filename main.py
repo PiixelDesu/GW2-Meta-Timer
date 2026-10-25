@@ -20,12 +20,14 @@ def occurrences(event,now):
     seq=event.get('sequences',{})
     pattern=seq.get('pattern',event.get('pattern',[]))
     partial=seq.get('partial',[])
-    if not pattern:return []
+    if not pattern and not partial:return []
     segs=event.get('segments',[])
     lookup={str(s.get('id',i)):s for i,s in enumerate(segs)} if isinstance(segs,list) else segs
     midnight=now.replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
     # Partial is the prefix at UTC midnight, followed by the repeating pattern.
-    steps=partial+pattern*35
+    # Partial-only schedules (e.g. Hard world bosses) have no repeating pattern.
+    # Repeat their UTC-day prefix for tomorrow so late-day checks still find bosses.
+    steps=(partial + pattern*35) if pattern else partial
     cursor=midnight; out=[]
     for item in steps:
         idx=item.get('r');duration=item.get('d')
@@ -35,6 +37,21 @@ def occurrences(event,now):
             out.append((int(cursor),segment))
         cursor+=duration*60
         if cursor>now.timestamp()+86400:break
+    if not pattern:
+        # The partial-only dataset can extend beyond midnight. Keep the next
+        # day's occurrences in range without duplicating those already listed.
+        cursor = midnight + 86400
+        for item in partial:
+            duration = item.get('d')
+            if not isinstance(duration, (int, float)) or duration <= 0:
+                continue
+            segment = lookup.get(str(item.get('r')), {})
+            if cursor >= now.timestamp() and cursor < now.timestamp() + 86400 and segment.get('name'):
+                if not any(ts == int(cursor) and seg.get('name') == segment.get('name') for ts, seg in out):
+                    out.append((int(cursor), segment))
+            cursor += duration * 60
+            if cursor >= now.timestamp() + 86400:
+                break
     return out
 
 def build(events, now):
