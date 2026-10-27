@@ -95,9 +95,24 @@ def build(events, now):
     fields = []
     for cat, rows in sorted(groups.items(), key=lambda kv: min(r[0] for r in kv[1])):
         rows.sort(key=lambda r: (r[0], r[1]))
-        lines = [f'• **{str(map_name)[:90]} — {phase[:110]}** · <t:{ts}:R> (<t:{ts}:t>)'
-                 + (f' · WP `{chatlink}`' if re.fullmatch(r'\[&[A-Za-z0-9+/=]+\]', chatlink) else '')
-                 for event_id, ts, map_name, phase, chatlink in rows]
+        # Compact single-line rows: event | next spawn | copyable GW2 waypoint.
+        # Keep the full phase name and map name, while avoiding repeated long
+        # timestamp labels that make Discord embeds appear unnecessarily narrow.
+        lines = []
+        for event_id, ts, map_name, phase, chatlink in rows:
+            name = str(map_name).strip()
+            phase = str(phase).strip()
+            label = phase if name.lower() == phase.lower() else f'{name} — {phase}'
+            waypoint = (f' · `{chatlink}`'
+                        if re.fullmatch(r'\[&[A-Za-z0-9+/=]+\]', chatlink) else '')
+            # Discord field values are limited to 1024 characters.
+            line = f'• **{label}** · <t:{ts}:R> · <t:{ts}:t>{waypoint}'
+            if len(line) > 1024:
+                # Only truncate exceptionally long labels, never the waypoint.
+                overhead = len(line) - len(label)
+                label = label[:max(1, 1024 - overhead - 1)] + '…'
+                line = f'• **{label}** · <t:{ts}:R> · <t:{ts}:t>{waypoint}'
+            lines.append(line)
         # Discord field values max 1024 characters; chunk without dropping rows.
         chunk, chunk_len, part = [], 0, 1
         for line in lines:
@@ -130,7 +145,7 @@ def build(events, now):
     print(f'Dashboard: {sum(len(v) for v in groups.values())} event groups, '
           f'{len(groups)} categories, {len(embeds)} embeds')
     return {
-        'content': f'**Guild Wars 2 — Scheduled Meta Events**\nUpdated <t:{int(now_ts)}:R> · Local timezone timestamps\nNext phase per map; all upcoming Core Tyria world bosses. Offline schedule; instance progress may vary.',
+        'content': f'**Guild Wars 2 — Scheduled Meta Events**\nUpdated <t:{int(now_ts)}:R> · Event | countdown | local time | waypoint\nNext phase per map; all upcoming Core Tyria world bosses. Offline schedule; instance progress may vary.',
         'embeds': embeds,
         'allowed_mentions': {'parse': []}
     }
