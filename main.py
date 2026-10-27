@@ -72,20 +72,20 @@ def build(events, now):
             name = str(seg.get('name', '')).strip()
             if ts < now_ts or not name or name.lower().startswith(('reset', '(continued)', 'preparations')):
                 continue
-            valid.append((ts, name))
+            valid.append((ts, name, str(seg.get("chatlink") or "").strip()))
         if valid:
             event_id = int(event.get('id', 999999))
             if cat == 'Core Tyria' and event.get('name') in ('World bosses', 'Hard world bosses'):
                 # Show every distinct boss's next spawn in the next 24 hours.
                 # Keep event-ID ordering, then chronological order within each boss rotation.
                 first_by_boss = {}
-                for ts, phase in valid:
-                    first_by_boss.setdefault(phase, ts)
-                for phase, ts in sorted(first_by_boss.items(), key=lambda item: item[1]):
-                    groups.setdefault(cat, []).append((event_id, ts, event.get('name', 'Map'), phase))
+                for ts, phase, chatlink in valid:
+                    first_by_boss.setdefault(phase, (ts, chatlink))
+                for phase, (ts, chatlink) in sorted(first_by_boss.items(), key=lambda item: item[1][0]):
+                    groups.setdefault(cat, []).append((event_id, ts, event.get('name', 'Map'), phase, chatlink))
             else:
-                ts, phase = min(valid)
-                groups.setdefault(cat, []).append((event_id, ts, event.get('name', 'Map'), phase))
+                ts, phase, chatlink = min(valid)
+                groups.setdefault(cat, []).append((event_id, ts, event.get('name', 'Map'), phase, chatlink))
 
     if not groups:
         raise ValueError('No scheduled events found; check events.json')
@@ -96,7 +96,8 @@ def build(events, now):
     for cat, rows in sorted(groups.items(), key=lambda kv: min(r[0] for r in kv[1])):
         rows.sort(key=lambda r: (r[0], r[1]))
         lines = [f'• **{str(map_name)[:90]} — {phase[:110]}** · <t:{ts}:R> (<t:{ts}:t>)'
-                 for event_id, ts, map_name, phase in rows]
+                 + (f' · WP `{chatlink}`' if re.fullmatch(r'\[&[A-Za-z0-9+/=]+\]', chatlink) else '')
+                 for event_id, ts, map_name, phase, chatlink in rows]
         # Discord field values max 1024 characters; chunk without dropping rows.
         chunk, chunk_len, part = [], 0, 1
         for line in lines:
